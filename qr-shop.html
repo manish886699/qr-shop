@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QR Shop — Admin + Order</title>
+
+<!-- libs -->
+<script src="https://unpkg.com/html5-qrcode" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+
+<style>
+  body{font-family:system-ui,Arial;margin:12px;background:#f7f7f9;color:#111}
+  h1,h2{margin:8px 0}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:#fff;padding:12px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+  input,textarea,button,select{width:100%;padding:10px;margin:6px 0;border:1px solid #ddd;border-radius:6px;font-size:15px}
+  button.primary{background:#0b74de;color:#fff;border:0}
+  .small{font-size:13px;color:#666}
+  img.thumb{max-width:120px;border-radius:6px;border:1px solid #eee}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border:1px solid #eee;padding:8px;text-align:left}
+  .actions{display:flex;gap:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<h1>QR Shop — Admin & Order</h1>
+
+<div class="grid">
+
+  <!-- Admin: Add Product -->
+  <div class="card">
+    <h2>Admin — Add Product</h2>
+    <div class="small">Product data will be stored in Google Sheet (Products).</div>
+    <input id="ad-productNo" placeholder="Product No (e.g., D123)">
+    <input id="ad-productName" placeholder="Product Name">
+    <input id="ad-price" type="number" placeholder="Price">
+    <textarea id="ad-details" placeholder="Details (optional)"></textarea>
+    <input id="ad-photo" type="file" accept="image/*">
+    <div id="ad-preview" style="margin-top:6px"></div>
+    <div class="actions">
+      <button id="btnAddProduct" class="primary">Save Product</button>
+      <button id="btnListProducts">Refresh List</button>
+    </div>
+    <div id="addStatus" class="small"></div>
+
+    <h3 style="margin-top:12px">Products (from sheet)</h3>
+    <div id="productList" style="max-height:260px;overflow:auto"></div>
+  </div>
+
+  <!-- Order: Scan & Cart -->
+  <div class="card">
+    <h2>Order — Scan & Add</h2>
+    <div class="small">Scan QR (product no) to auto-load product from sheet.</div>
+    <div style="margin:8px 0;">
+      <button id="btnStartScan" class="primary">📷 Start Scan</button>
+      <button id="btnStopScan">Stop</button>
+    </div>
+    <div id="reader" style="width:100%;max-width:420px"></div>
+
+    <div id="productArea" style="display:none;margin-top:8px">
+      <h3>Product</h3>
+      <img id="prod-photo" class="thumb" src="">
+      <div><strong id="prod-name"></strong></div>
+      <div class="small">ID: <span id="prod-no"></span></div>
+      <div class="small">Price: ₹<span id="prod-price"></span></div>
+      <input id="prod-qty" type="number" min="1" value="1" placeholder="Quantity">
+      <button id="btnAddToCart" class="primary">Add to Cart</button>
+    </div>
+
+    <h3 style="margin-top:12px">Cart</h3>
+    <table id="cartTable">
+      <thead><tr><th>Photo</th><th>Name</th><th>Qty</th><th>Price</th><th>Total</th><th>Action</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <div><strong>Total: ₹<span id="grandTotal">0</span></strong></div>
+      <div style="width:48%">
+        <input id="customerName" placeholder="Customer Name">
+        <input id="customerPhone" placeholder="Customer Mobile">
+      </div>
+    </div>
+    <div class="actions" style="margin-top:8px">
+      <button id="btnCompleteOrder" class="primary">✅ Complete Order (Save & PDF)</button>
+      <button id="btnClearCart">Clear Cart</button>
+    </div>
+    <div id="orderStatus" class="small" style="margin-top:6px"></div>
+  </div>
+
+</div>
+
+<script>
+/* ================== CONFIG ================== */
+// Replace with your deployed Apps Script Web App URL if different:
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzTtbUPhaKXaOIAR-XaMqQxozImnY_jh9npt2QdYmCt7WUdjykUUvMUlQVdKa8POnnGfw/exec";
+
+/* ================== UTILITIES ================== */
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; }
+
+/* ================ ADMIN: add product (photo as dataURL) ================ */
+const adPhoto = $('#ad-photo');
+adPhoto.addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if(!f) { $('#ad-preview').innerHTML=''; return; }
+  const dataUrl = await fileToDataURL(f);
+  $('#ad-preview').innerHTML = `<img src="${dataUrl}" class="thumb">`;
+  $('#ad-preview').dataset.dataurl = dataUrl;
+});
+
+$('#btnAddProduct').addEventListener('click', async () => {
+  const productNo = $('#ad-productNo').value.trim();
+  const productName = $('#ad-productName').value.trim();
+  const price = parseFloat($('#ad-price').value||0) || 0;
+  const details = $('#ad-details').value.trim();
+  const photo = $('#ad-preview').dataset.dataurl || "";
+
+  if(!productNo || !productName) { $('#addStatus').textContent = 'Enter productNo & name'; return; }
+  $('#addStatus').textContent = 'Saving...';
+
+  try {
+    const body = {
+      action: 'addProduct',
+      productNo, productName, price, details, photo
+    };
+    const res = await fetch(SCRIPT_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const json = await res.json();
+    if(json.status === 'success') {
+      $('#addStatus').textContent = 'Product saved!';
+      $('#ad-productNo').value=''; $('#ad-productName').value=''; $('#ad-price').value=''; $('#ad-details').value=''; $('#ad-photo').value=''; $('#ad-preview').innerHTML=''; delete $('#ad-preview').dataset.dataurl;
+      loadProductList();
+    } else {
+      $('#addStatus').textContent = 'Save failed: ' + (json.error || JSON.stringify(json));
+    }
+  } catch(err) {
+    $('#addStatus').textContent = 'Save error: ' + err;
+    console.error(err);
+  }
+});
+
+/* ================ Product list ================ */
+async function loadProductList(){
+  $('#productList').innerHTML = 'Loading...';
+  try {
+    const resp = await fetch(SCRIPT_URL + '?action=getAllProducts');
+    const j = await resp.json();
+    if(j.status === 'ok' && j.products){
+      const out = j.products.map(p=>{
+        return `<div style="display:flex;gap:8px;align-items:center;padding:6px;border-bottom:1px solid #f0f0f0">
+          <img src="${p.photo||''}" class="thumb">
+          <div style="flex:1"><strong>${p.productNo}</strong><br><span class="small">${p.productName} • ₹${p.price}</span></div>
+          <button data-id="${p.productNo}" class="useBtn">Use</button>
+        </div>`;
+      }).join('');
+      $('#productList').innerHTML = out || '<div class="small">No products</div>';
+      $$('.useBtn').forEach(b=>b.addEventListener('click', ()=> {
+        fetchProductAndShow(b.dataset.id);
+      }));
+    } else {
+      $('#productList').innerHTML = 'No products or error';
+    }
+  } catch(err) {
+    $('#productList').innerHTML = 'Load error: ' + err;
+  }
+}
+loadProductList();
+
+/* ================ Helper: file to dataURL ================ */
+function fileToDataURL(file){
+  return new Promise((resolve,reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=> resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
+
+/* ================ QR SCAN & Product fetch ================ */
+let html5QrScanner = null;
+$('#btnStartScan').addEventListener('click', startScan);
+$('#btnStopScan').addEventListener('click', stopScan);
+
+function startScan(){
+  $('#orderStatus').textContent = '';
+  if(html5QrScanner) return;
+  const readerId = "reader";
+  const config = { fps: 10, qrbox: 250 };
+  html5QrScanner = new Html5Qrcode(readerId);
+  Html5Qrcode.getCameras().then(cameras=>{
+    if(cameras && cameras.length){
+      const cameraId = cameras[0].id;
+      html5QrScanner.start({ deviceId: { exact: cameraId } }, config, onScanSuccess, onScanFailure)
+        .catch(err => { alert('Camera start error: ' + err); });
+    } else {
+      alert('No camera found');
+    }
+  }).catch(err=>alert('Cameras error: ' + err));
+}
+
+function stopScan(){
+  if(!html5QrScanner) return;
+  html5QrScanner.stop().then(()=>{ html5QrScanner.clear(); html5QrScanner = null; }).catch(()=>{ html5QrScanner = null; });
+}
+
+function onScanSuccess(decodedText, decodedResult){
+  // expecting QR contains productNo like: D123 or just text
+  stopScan();
+  const productNo = decodedText.trim();
+  fetchProductAndShow(productNo);
+}
+function onScanFailure(err){ /* ignore */ }
+
+async function fetchProductAndShow(productNo){
+  $('#orderStatus').textContent = 'Fetching product...';
+  try {
+    const res = await fetch(SCRIPT_URL + '?action=getProduct&productNo=' + encodeURIComponent(productNo));
+    const j = await res.json();
+    if(j.status === 'ok' && j.product){
+      const p = j.product;
+      currentLoadedProduct = p;
+      $('#prod-photo').src = p.photo || '';
+      $('#prod-name').textContent = p.productName || '';
+      $('#prod-no').textContent = p.productNo || '';
+      $('#prod-price').textContent = p.price || 0;
+      $('#prod-qty').value = 1;
+      $('#productArea').style.display = 'block';
+      $('#orderStatus').textContent = '';
+      // scroll to product area
+      window.scrollTo({ top: document.getElementById('productArea').offsetTop - 20, behavior:'smooth' });
+    } else {
+      $('#orderStatus').textContent = 'Product not found';
+      alert('Product not found on sheet');
+    }
+  } catch(err) {
+    $('#orderStatus').textContent = 'Fetch error';
+    alert('Fetch error: ' + err);
+  }
+}
+
+/* ================ CART logic ================ */
+let cart = [];
+let currentLoadedProduct = null;
+
+$('#btnAddToCart').addEventListener('click', ()=>{
+  const qty = parseInt($('#prod-qty').value||'1',10);
+  if(!currentLoadedProduct) return alert('No product loaded');
+  if(!qty || qty < 1) return alert('Enter quantity');
+  const item = {
+    productNo: currentLoadedProduct.productNo,
+    productName: currentLoadedProduct.productName,
+    price: Number(currentLoadedProduct.price || 0),
+    photo: currentLoadedProduct.photo || '',
+    qty: qty,
+    total: qty * (Number(currentLoadedProduct.price || 0))
+  };
+  cart.push(item);
+  currentLoadedProduct = null;
+  $('#productArea').style.display = 'none';
+  renderCart();
+});
+
+function renderCart(){
+  const tbody = $('#cartTable tbody');
+  tbody.innerHTML = '';
+  let grand = 0;
+  cart.forEach((it, idx)=>{
+    grand += it.total;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><img src="${it.photo}" class="thumb"></td>
+      <td>${it.productName}<br><span class="small">${it.productNo}</span></td>
+      <td><input type="number" data-idx="${idx}" class="editQty" value="${it.qty}" style="width:70px"></td>
+      <td>₹${it.price}</td>
+      <td>₹${it.total}</td>
+      <td><button data-del="${idx}">Remove</button></td>`;
+    tbody.appendChild(tr);
+  });
+  $('#grandTotal').textContent = grand.toFixed(2);
+
+  // handlers
+  $$('.editQty').forEach(inp => inp.addEventListener('change', (e)=>{
+    const i = Number(e.target.dataset.idx);
+    const nv = Number(e.target.value||1);
+    cart[i].qty = nv;
+    cart[i].total = cart[i].price * nv;
+    renderCart();
+  }));
+  $$('button[data-del]').forEach(b=> b.addEventListener('click', (e)=>{
+    const i = Number(e.target.dataset.del);
+    cart.splice(i,1); renderCart();
+  }));
+}
+
+$('#btnClearCart').addEventListener('click', ()=>{ cart = []; renderCart(); });
+
+/* ================ COMPLETE ORDER (save to sheet + pdf) ================ */
+$('#btnCompleteOrder').addEventListener('click', async ()=>{
+  const name = $('#customerName').value.trim();
+  const phone = $('#customerPhone').value.trim();
+  if(!name || !phone) return alert('Enter customer name and phone');
+  if(!cart.length) return alert('Cart is empty');
+
+  $('#orderStatus').textContent = 'Saving order...';
+
+  const orderPayload = {
+    action: 'saveOrder',
+    customerName: name,
+    customerPhone: phone,
+    items: cart,
+    grandTotal: Number($('#grandTotal').textContent || 0)
+  };
+
+  try {
+    const res = await fetch(SCRIPT_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(orderPayload) });
+    const j = await res.json();
+    if(j.status === 'success') {
+      $('#orderStatus').textContent = 'Order saved ✅';
+      // generate PDF
+      await generatePDFAndOfferDownload({ customerName: name, customerPhone: phone, items: cart, grandTotal: orderPayload.grandTotal });
+      // clear cart
+      cart = []; renderCart();
+      $('#customerName').value=''; $('#customerPhone').value='';
+    } else {
+      $('#orderStatus').textContent = 'Save failed';
+      alert('Save failed: ' + JSON.stringify(j));
+    }
+  } catch(err) {
+    $('#orderStatus').textContent = 'Save error';
+    alert('Save error: ' + err);
+  }
+});
+
+/* ================ PDF generation ================ */
+async function generatePDFAndOfferDownload(order){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  let y = 40;
+  doc.setFontSize(14); doc.text('Invoice / Order', 40, y); y += 20;
+  doc.setFontSize(11); doc.text(`Customer: ${order.customerName}`, 40, y); y += 16;
+  doc.text(`Phone: ${order.customerPhone}`, 40, y); y += 20;
+  doc.text('Items:', 40, y); y += 16;
+
+  for (let i=0;i<order.items.length;i++){
+    const it = order.items[i];
+    doc.text(`${i+1}. ${it.productName} (${it.productNo})`, 40, y); y += 14;
+    doc.text(`Qty: ${it.qty}  Rate: ₹${it.price}  Total: ₹${it.total.toFixed(2)}`, 60, y); y += 16;
+    // optionally embed image (dataURL) scaled
+    if(it.photo && it.photo.startsWith('data:image')) {
+      try {
+        // each image 60x60 pt
+        doc.addImage(it.photo, 'JPEG', 420, y-30, 60, 60);
+      } catch(e){}
+    }
+    if(y > 700){ doc.addPage(); y = 40; }
+  }
+  y += 10;
+  doc.setFontSize(12); doc.text(`Grand Total: ₹${order.grandTotal}`, 40, y);
+
+  // Save and trigger download
+  doc.save(`order_${Date.now()}.pdf`);
+}
+
+/* ================ Init: load products list on start ================ */
+window.addEventListener('load', ()=>{ loadProductList(); });
+</script>
+</body>
+</html>
