@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QR Shop — Admin</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+body{font-family:system-ui;padding:14px}
+input,textarea,button{width:100%;padding:10px;margin:6px 0;border-radius:6px;border:1px solid #ccc}
+img.thumb{max-width:120px;border-radius:6px}
+#productList{margin-top:12px}
+.productRow{display:flex;gap:10px;align-items:center;padding:8px;border-bottom:1px solid #eee}
+</style>
+</head>
+<body>
+<h2>Admin — Add Product</h2>
+<input id="productNo" placeholder="Product No (e.g., D123)">
+<input id="productName" placeholder="Product Name">
+<input id="price" type="number" placeholder="Price">
+<textarea id="details" placeholder="Details (optional)"></textarea>
+<input id="photoFile" type="file" accept="image/*">
+<div id="preview"></div>
+<button id="saveProduct">Save Product</button>
+
+<h3>Products</h3>
+<div id="productList"></div>
+
+<!-- QR modal -->
+<div id="qrModal" style="display:none;padding:10px;border:1px solid #ddd;margin-top:12px">
+  <div id="qrcode"></div>
+  <div style="margin-top:8px">
+    <button id="downloadQR">Download QR</button>
+    <button id="printLabel">Print Label</button>
+  </div>
+</div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzrtxqwfAwxvmuR9z40cWcJRPNeTD-wZSFiIXIa5-LB2FEZLpQna_PQh1zojlOoKdzg9A/exec"; // <-- replace with Apps Script URL
+
+// preview image
+document.getElementById('photoFile').addEventListener('change', async (e)=>{
+  const f = e.target.files[0];
+  if(!f) { document.getElementById('preview').innerHTML=''; return; }
+  const data = await fileToDataURL(f);
+  document.getElementById('preview').innerHTML = `<img src="${data}" class="thumb">`;
+  document.getElementById('preview').dataset.dataurl = data;
+});
+
+async function fileToDataURL(file){
+  return new Promise((res,rej)=>{
+    const fr = new FileReader();
+    fr.onload = ()=>res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+}
+
+document.getElementById('saveProduct').addEventListener('click', async ()=>{
+  const productNo = document.getElementById('productNo').value.trim();
+  const productName = document.getElementById('productName').value.trim();
+  const price = Number(document.getElementById('price').value||0);
+  const details = document.getElementById('details').value.trim();
+  const photo = document.getElementById('preview').dataset.dataurl || "";
+
+  if(!productNo || !productName) return alert('Enter productNo & name');
+
+  const body = { action:'addProduct', productNo, productName, price, details, photo };
+  try {
+    const res = await fetch(SCRIPT_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const j = await res.json();
+    if(j.status === 'success'){
+      alert('Product saved');
+      loadProducts();
+      // generate QR for productNo
+      showQR(productNo);
+    } else {
+      alert('Save failed: ' + JSON.stringify(j));
+    }
+  } catch(err){
+    alert('Save error: ' + err);
+  }
+});
+
+async function loadProducts(){
+  const box = document.getElementById('productList');
+  box.innerHTML = 'Loading...';
+  try {
+    const res = await fetch(SCRIPT_URL + '?action=getAllProducts');
+    const j = await res.json();
+    if(j.status === 'ok' && j.products){
+      box.innerHTML = '';
+      j.products.forEach(p=>{
+        const div = document.createElement('div'); div.className='productRow';
+        div.innerHTML = `<img src="${p.photo||''}" class="thumb"><div style="flex:1"><strong>${p.productNo}</strong><br>${p.productName} • ₹${p.price}</div>
+          <div><button data-id="${p.productNo}" class="qrBtn">QR</button></div>`;
+        box.appendChild(div);
+      });
+      document.querySelectorAll('.qrBtn').forEach(b=> b.addEventListener('click', ()=> showQR(b.dataset.id)));
+    } else box.innerHTML = 'No products';
+  } catch(err){ box.innerHTML = 'Load error: '+err; }
+}
+loadProducts();
+
+function showQR(productNo){
+  document.getElementById('qrModal').style.display = 'block';
+  document.getElementById('qrcode').innerHTML = '';
+  new QRCode(document.getElementById('qrcode'), { text: productNo, width:200, height:200 });
+  // download button
+  document.getElementById('downloadQR').onclick = ()=>{
+    const canvas = document.querySelector('#qrcode canvas');
+    if(!canvas) return;
+    const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `${productNo}.png`; a.click();
+  };
+  document.getElementById('printLabel').onclick = ()=>{
+    const canvas = document.querySelector('#qrcode canvas');
+    if(!canvas) return;
+    const w = window.open('','_blank');
+    const img = canvas.toDataURL('image/png');
+    w.document.write(`<img src="${img}"><p>${productNo}</p><script>window.print()</script>`);
+  };
+}
+</script>
+</body>
+</html>
