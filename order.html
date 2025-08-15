@@ -1,53 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Order Page</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shop Order System</title>
+<style>
+    body { font-family: Arial, sans-serif; padding: 15px; }
+    input, button { width: 100%; padding: 8px; margin: 5px 0; font-size: 16px; }
+    button { background-color: #28a745; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #218838; }
+</style>
 </head>
 <body>
 
-  <!-- Order form -->
-  <input type="text" id="productNo" placeholder="Product No">
-  <input type="text" id="productName" placeholder="Product Name">
-  <input type="number" id="quantity" placeholder="Quantity">
-  <input type="number" id="price" placeholder="Price">
-  <input type="text" id="photo" placeholder="Photo URL">
-  
-  <button onclick="completeOrder()">Complete Order</button>
+<h2>Product Order Form</h2>
 
-  <script>
-    // Step 1: Google Sheet saving function
-    function saveOrderToSheet(order) {
-      fetch("https://script.google.com/macros/s/AKfycbzI-bQSA0jPMJN2ndeSpFsmVhJ5Z3O4oP8GTT4E_e0Bpc4cO5VZun33oZbll9PzplPrcQ/exec", {
-        method: "POST",
-        body: JSON.stringify(order)
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.status === "success") {
-          alert("Order saved to Google Sheet!");
+<input type="text" id="productNo" placeholder="Product No">
+<input type="text" id="productName" placeholder="Product Name">
+<input type="number" id="quantity" placeholder="Quantity">
+<input type="number" id="price" placeholder="Price">
+<input type="text" id="photo" placeholder="Product Photo URL" oninput="previewImage()">
+
+<img id="preview" src="" alt="Preview" style="max-width:100%; margin-top:10px; display:none;">
+
+<h3>Total: ₹<span id="total">0</span></h3>
+
+<button onclick="completeOrder()">Complete Order</button>
+<button onclick="downloadPDF()">Download PDF</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+    function previewImage() {
+        let url = document.getElementById("photo").value;
+        let img = document.getElementById("preview");
+        if(url) {
+            img.src = url;
+            img.style.display = "block";
+        } else {
+            img.style.display = "none";
         }
-      })
-      .catch(err => console.error(err));
     }
 
-    // Step 2: Order complete hone par data collect karna
+    function calculateTotal() {
+        let qty = parseInt(document.getElementById("quantity").value) || 0;
+        let price = parseFloat(document.getElementById("price").value) || 0;
+        document.getElementById("total").textContent = qty * price;
+    }
+
+    document.getElementById("quantity").addEventListener("input", calculateTotal);
+    document.getElementById("price").addEventListener("input", calculateTotal);
+
+    function saveOrderToSheet(order) {
+        fetch("https://script.google.com/macros/s/AKfycbzI-bQSA0jPMJN2ndeSpFsmVhJ5Z3O4oP8GTT4E_e0Bpc4cO5VZun33oZbll9PzplPrcQ/exec", {
+            method: "POST",
+            body: JSON.stringify(order)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                alert("✅ Order saved to Google Sheet!");
+            }
+        })
+        .catch(err => console.error(err));
+    }
+
     function completeOrder() {
-      let qty = parseInt(document.getElementById("quantity").value);
-      let price = parseFloat(document.getElementById("price").value);
-      let total = qty * price;
+        let qty = parseInt(document.getElementById("quantity").value) || 0;
+        let price = parseFloat(document.getElementById("price").value) || 0;
+        let total = qty * price;
 
-      let order = {
-        productNo: document.getElementById("productNo").value,
-        productName: document.getElementById("productName").value,
-        quantity: qty,
-        price: price,
-        total: total,
-        photo: document.getElementById("photo").value
-      };
+        let order = {
+            productNo: document.getElementById("productNo").value,
+            productName: document.getElementById("productName").value,
+            quantity: qty,
+            price: price,
+            total: total,
+            photo: document.getElementById("photo").value
+        };
 
-      saveOrderToSheet(order);
+        saveOrderToSheet(order);
     }
-  </script>
+
+    function downloadPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        let productNo = document.getElementById("productNo").value;
+        let productName = document.getElementById("productName").value;
+        let qty = document.getElementById("quantity").value;
+        let price = document.getElementById("price").value;
+        let total = document.getElementById("total").textContent;
+        let photoURL = document.getElementById("photo").value;
+
+        doc.text(`Product No: ${productNo}`, 10, 10);
+        doc.text(`Product Name: ${productName}`, 10, 20);
+        doc.text(`Quantity: ${qty}`, 10, 30);
+        doc.text(`Price: ₹${price}`, 10, 40);
+        doc.text(`Total: ₹${total}`, 10, 50);
+
+        if(photoURL) {
+            let img = new Image();
+            img.crossOrigin = "Anonymous";
+            img.onload = function () {
+                doc.addImage(img, "JPEG", 10, 60, 50, 50);
+                doc.save("order.pdf");
+            };
+            img.src = photoURL;
+        } else {
+            doc.save("order.pdf");
+        }
+    }
+</script>
 
 </body>
 </html>
