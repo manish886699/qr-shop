@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR Shop Admin</title>
+<style>
+body { font-family: system-ui; margin: 20px; }
+input, button { padding: 8px; margin: 5px 0; width: 100%; }
+img { max-width: 200px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1>📦 Add Product & Generate QR</h1>
+
+<label>Product D.No</label>
+<input id="dno" type="text">
+
+<label>Product Price</label>
+<input id="price" type="number">
+
+<label>Product Details</label>
+<input id="details" type="text">
+
+<label>Product Photo</label>
+<input id="photo" type="file" accept="image/*">
+
+<button onclick="addProduct()">Add Product</button>
+
+<div id="qrcode"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+let products = JSON.parse(localStorage.getItem("products") || "[]");
+
+function addProduct() {
+    let dno = document.getElementById("dno").value.trim();
+    let price = document.getElementById("price").value;
+    let details = document.getElementById("details").value.trim();
+    let photoFile = document.getElementById("photo").files[0];
+
+    if(!dno || !price || !details || !photoFile) {
+        alert("Please fill all fields and select photo.");
+        return;
+    }
+
+    let reader = new FileReader();
+    reader.onload = function(e) {
+        let product = {
+            id: Date.now(),
+            dno, price, details,
+            photo: e.target.result
+        };
+        products.push(product);
+        localStorage.setItem("products", JSON.stringify(products));
+
+        let qrData = `product:${product.id}`;
+        document.getElementById("qrcode").innerHTML = "";
+        new QRCode(document.getElementById("qrcode"), {
+            text: qrData,
+            width: 150,
+            height: 150
+        });
+        alert("Product added! QR generated below.");
+    };
+    reader.readAsDataURL(photoFile);
+}
+</script>
+</body>
+</html>
