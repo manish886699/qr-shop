@@ -79,7 +79,7 @@ function completeOrder() {
     updateCart();
 }
 function saveOrderToSheet(order) {
-  fetch("PASTE_YOUR_WEB_APP_URL_HERE", {
+  fetch("https://script.google.com/macros/s/AKfycbzI-bQSA0jPMJN2ndeSpFsmVhJ5Z3O4oP8GTT4E_e0Bpc4cO5VZun33oZbll9PzplPrcQ/exec", {
     method: "POST",
     body: JSON.stringify(order)
   })
