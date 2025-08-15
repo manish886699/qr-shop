@@ -78,6 +78,19 @@ function completeOrder() {
     cart = [];
     updateCart();
 }
+function saveOrderToSheet(order) {
+  fetch("PASTE_YOUR_WEB_APP_URL_HERE", {
+    method: "POST",
+    body: JSON.stringify(order)
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.status === "success") {
+      alert("Order saved to Google Sheet!");
+    }
+  })
+  .catch(err => console.error(err));
+}
 
 startScanner();
 </script>
