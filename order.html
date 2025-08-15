@@ -2,114 +2,152 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shop Order System</title>
+<title>QR Order System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
-    body { font-family: Arial, sans-serif; padding: 15px; }
-    input, button { width: 100%; padding: 8px; margin: 5px 0; font-size: 16px; }
-    button { background-color: #28a745; color: white; border: none; cursor: pointer; }
-    button:hover { background-color: #218838; }
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  button { padding: 10px; margin: 5px 0; }
+  img { max-width: 100px; margin: 5px 0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
 </style>
 </head>
 <body>
 
-<h2>Product Order Form</h2>
+<h2>QR Code Order System</h2>
 
-<input type="text" id="productNo" placeholder="Product No">
-<input type="text" id="productName" placeholder="Product Name">
-<input type="number" id="quantity" placeholder="Quantity">
-<input type="number" id="price" placeholder="Price">
-<input type="text" id="photo" placeholder="Product Photo URL" oninput="previewImage()">
+<button onclick="startScan()">📷 Scan QR</button>
+<div id="reader" style="width:300px; margin-top:10px;"></div>
 
-<img id="preview" src="" alt="Preview" style="max-width:100%; margin-top:10px; display:none;">
+<div id="product-details" style="display:none;">
+  <h3>Product Details</h3>
+  <img id="product-photo">
+  <p><b>ID:</b> <span id="p-id"></span></p>
+  <p><b>Name:</b> <span id="p-name"></span></p>
+  <p><b>Price:</b> ₹<span id="p-price"></span></p>
+  <input type="number" id="p-qty" placeholder="Quantity" min="1">
+  <button onclick="addToOrder()">Add to Order</button>
+</div>
 
-<h3>Total: ₹<span id="total">0</span></h3>
+<h3>Order List</h3>
+<table id="order-table">
+  <thead>
+    <tr><th>Photo</th><th>Name</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
 
-<button onclick="completeOrder()">Complete Order</button>
-<button onclick="downloadPDF()">Download PDF</button>
+<h3>Customer Details</h3>
+<input type="text" id="customer-name" placeholder="Customer Name"><br>
+<input type="tel" id="customer-phone" placeholder="Mobile Number"><br><br>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<button onclick="completeOrder()">✅ Complete Order</button>
+
 <script>
-    function previewImage() {
-        let url = document.getElementById("photo").value;
-        let img = document.getElementById("preview");
-        if(url) {
-            img.src = url;
-            img.style.display = "block";
-        } else {
-            img.style.display = "none";
-        }
+let orderItems = [];
+let currentProduct = null;
+const scriptURL = "https://script.google.com/macros/s/AKfycbzI-bQSA0jPMJN2ndeSpFsmVhJ5Z3O4oP8GTT4E_e0Bpc4cO5VZun33oZbll9PzplPrcQ/exec";
+
+function startScan() {
+  const html5QrCode = new Html5Qrcode("reader");
+  html5QrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: 250 },
+    (decodedText) => {
+      html5QrCode.stop();
+      fetchProduct(decodedText.trim());
     }
+  ).catch(err => alert("Camera start error: " + err));
+}
 
-    function calculateTotal() {
-        let qty = parseInt(document.getElementById("quantity").value) || 0;
-        let price = parseFloat(document.getElementById("price").value) || 0;
-        document.getElementById("total").textContent = qty * price;
-    }
+function fetchProduct(productNo) {
+  fetch(`${scriptURL}?action=getProduct&productNo=${encodeURIComponent(productNo)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data && data.productName) {
+        currentProduct = data;
+        document.getElementById("p-id").innerText = data.productNo;
+        document.getElementById("p-name").innerText = data.productName;
+        document.getElementById("p-price").innerText = data.price;
+        document.getElementById("product-photo").src = data.photo;
+        document.getElementById("product-details").style.display = "block";
+      } else {
+        alert("Product not found!");
+      }
+    })
+    .catch(err => alert("Fetch error: " + err));
+}
 
-    document.getElementById("quantity").addEventListener("input", calculateTotal);
-    document.getElementById("price").addEventListener("input", calculateTotal);
+function addToOrder() {
+  const qty = parseInt(document.getElementById("p-qty").value);
+  if (!qty || qty < 1) return alert("Enter valid quantity");
+  
+  let item = {
+    photo: currentProduct.photo,
+    name: currentProduct.productName,
+    qty: qty,
+    price: currentProduct.price,
+    total: qty * currentProduct.price
+  };
+  orderItems.push(item);
+  renderTable();
+  document.getElementById("product-details").style.display = "none";
+}
 
-    function saveOrderToSheet(order) {
-        fetch("https://script.google.com/macros/s/AKfycbzI-bQSA0jPMJN2ndeSpFsmVhJ5Z3O4oP8GTT4E_e0Bpc4cO5VZun33oZbll9PzplPrcQ/exec", {
-            method: "POST",
-            body: JSON.stringify(order)
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.status === "success") {
-                alert("✅ Order saved to Google Sheet!");
-            }
-        })
-        .catch(err => console.error(err));
-    }
+function renderTable() {
+  const tbody = document.querySelector("#order-table tbody");
+  tbody.innerHTML = "";
+  orderItems.forEach(item => {
+    tbody.innerHTML += `<tr>
+      <td><img src="${item.photo}"></td>
+      <td>${item.name}</td>
+      <td>${item.qty}</td>
+      <td>₹${item.price}</td>
+      <td>₹${item.total}</td>
+    </tr>`;
+  });
+}
 
-    function completeOrder() {
-        let qty = parseInt(document.getElementById("quantity").value) || 0;
-        let price = parseFloat(document.getElementById("price").value) || 0;
-        let total = qty * price;
+function completeOrder() {
+  const name = document.getElementById("customer-name").value.trim();
+  const phone = document.getElementById("customer-phone").value.trim();
+  if (!name || !phone) return alert("Enter customer details");
 
-        let order = {
-            productNo: document.getElementById("productNo").value,
-            productName: document.getElementById("productName").value,
-            quantity: qty,
-            price: price,
-            total: total,
-            photo: document.getElementById("photo").value
-        };
+  const orderData = {
+    customerName: name,
+    customerPhone: phone,
+    items: orderItems
+  };
 
-        saveOrderToSheet(order);
-    }
+  // Save to Google Sheet
+  fetch(scriptURL, {
+    method: "POST",
+    body: JSON.stringify(orderData)
+  })
+  .then(res => res.text())
+  .then(txt => {
+    alert("Order saved!");
+    generatePDF(orderData);
+    orderItems = [];
+    renderTable();
+  })
+  .catch(err => alert("Save error: " + err));
+}
 
-    function downloadPDF() {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-
-        let productNo = document.getElementById("productNo").value;
-        let productName = document.getElementById("productName").value;
-        let qty = document.getElementById("quantity").value;
-        let price = document.getElementById("price").value;
-        let total = document.getElementById("total").textContent;
-        let photoURL = document.getElementById("photo").value;
-
-        doc.text(`Product No: ${productNo}`, 10, 10);
-        doc.text(`Product Name: ${productName}`, 10, 20);
-        doc.text(`Quantity: ${qty}`, 10, 30);
-        doc.text(`Price: ₹${price}`, 10, 40);
-        doc.text(`Total: ₹${total}`, 10, 50);
-
-        if(photoURL) {
-            let img = new Image();
-            img.crossOrigin = "Anonymous";
-            img.onload = function () {
-                doc.addImage(img, "JPEG", 10, 60, 50, 50);
-                doc.save("order.pdf");
-            };
-            img.src = photoURL;
-        } else {
-            doc.save("order.pdf");
-        }
-    }
+function generatePDF(order) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.text(`Customer: ${order.customerName}`, 10, 10);
+  doc.text(`Phone: ${order.customerPhone}`, 10, 20);
+  let y = 30;
+  order.items.forEach(item => {
+    doc.text(`${item.name} - Qty: ${item.qty} - ₹${item.price} - Total: ₹${item.total}`, 10, y);
+    y += 10;
+  });
+  doc.save("order.pdf");
+}
 </script>
 
 </body>
